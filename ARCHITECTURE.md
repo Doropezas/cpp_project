@@ -111,6 +111,28 @@ public:
 
 This module is single-purpose and mostly synchronous. It does not compute signals.
 
+After loading, bars are stored in a **shared read-only cache** protected by `std::shared_mutex`. Many worker threads read concurrently; only the initial loader writes.
+
+```cpp
+class MarketDataCache {
+public:
+    // Called once by the loader thread — exclusive write access
+    void store(std::vector<DailyBar> bars);
+
+    // Called by many worker threads — concurrent read access
+    std::span<const DailyBar> get(const std::string& symbol) const;
+
+private:
+    mutable std::shared_mutex mutex_;
+    std::unordered_map<std::string, std::vector<DailyBar>> data_;
+};
+
+// Writer:  std::unique_lock lock(mutex_);   — exclusive
+// Readers: std::shared_lock lock(mutex_);   — concurrent
+```
+
+This is the canonical reader-writer lock pattern from the course.
+
 ### 3.2 Thread Pool
 
 Owns worker threads, accepts tasks, returns futures to callers, shuts down gracefully.
@@ -119,16 +141,35 @@ Owns worker threads, accepts tasks, returns futures to callers, shuts down grace
 class ThreadPool {
 public:
     explicit ThreadPool(std::size_t num_threads);
-    ~ThreadPool();
+    ~ThreadPool();  // joins all threads — RAII ownership
 
+    // Deleted: ThreadPool is not copyable or movable
+    ThreadPool(const ThreadPool&)            = delete;
+    ThreadPool& operator=(const ThreadPool&) = delete;
+    ThreadPool(ThreadPool&&)                 = delete;
+    ThreadPool& operator=(ThreadPool&&)      = delete;
+
+    // Perfect-forwarding submit: accepts any callable + args,
+    // returns a future of the callable's return type
     template<class F, class... Args>
     auto submit(F&& f, Args&&... args)
         -> std::future<std::invoke_result_t<F, Args...>>;
 
 private:
-    // task queue, mutex, condition_variable, shutdown flag, worker loop
+    std::vector<std::jthread> workers_;   // jthread auto-joins in destructor
+    std::queue<std::function<void()>> tasks_;  // type-erased task storage
+    std::mutex queue_mutex_;
+    std::condition_variable cv_;
+    bool stop_{false};
 };
 ```
+
+Key course concepts demonstrated here:
+- **Rule of five**: destructor defined → copy/move explicitly deleted
+- **`std::jthread`**: auto-joins on destruction — no manual `join()` needed
+- **`std::function`**: type erasure — queue holds any callable regardless of signature
+- **Perfect forwarding**: `F&&` + `Args&&...` + `std::forward` preserves value categories
+- **`std::future` / `std::promise`**: async result passing between threads
 
 The thread pool does not know anything about finance logic.
 
@@ -139,12 +180,27 @@ Computes reusable indicators and transforms them into trading signals. Does not 
 ```cpp
 struct SignalResult {
     std::string symbol;
-    std::vector<double> signal_values;
+    double value;       // normalized signal in [-1, +1]
+    double confidence;  // optional strength measure
 };
 
 class MovingAverageSignal { /* ... */ };
 class MomentumSignal      { /* ... */ };
 class VolatilitySignal    { /* ... */ };
+
+// std::variant for signal storage: one slot, one active type at a time
+using AnySignal = std::variant<MovingAverageSignal, MomentumSignal, VolatilitySignal>;
+
+// Dispatch via std::visit — no virtual calls, no inheritance required
+SignalResult compute(const AnySignal& signal, std::span<const DailyBar> bars) {
+    return std::visit([&](const auto& s) { return s.compute(bars); }, signal);
+}
+```
+
+Callers decompose results with structured bindings:
+
+```cpp
+auto [sym, val, conf] = compute(signal, bars);
 ```
 
 Signal parameters (windows, thresholds) are passed in via config — not hardcoded.
@@ -162,6 +218,16 @@ Converts signal outputs into positions, applies position rules, computes returns
 Combines results from many parallel jobs, computes summary statistics, produces stable output format.
 
 Metrics: total return, annualized return, volatility, Sharpe ratio, max drawdown, win rate, turnover.
+
+The aggregator holds two mutexes (results store + log writer). Uses `std::scoped_lock` to acquire both atomically and avoid deadlock:
+
+```cpp
+void record(BacktestResult result) {
+    std::scoped_lock lck(results_mutex_, log_mutex_);  // deadlock-safe
+    results_.push_back(std::move(result));
+    log_ << result.symbol << " recorded\n";
+}
+```
 
 ---
 
@@ -207,6 +273,43 @@ struct BacktestResult {
     std::vector<double> equity_curve;
     PerformanceMetrics metrics;
 };
+```
+
+### RollingWindow
+
+A reusable fixed-size circular buffer used by all signal computations:
+
+```cpp
+template<typename T, std::size_t N>
+class RollingWindow {
+    static_assert(N > 0, "RollingWindow size must be positive");
+    static_assert(N <= 10000, "RollingWindow size unreasonably large");
+public:
+    void push(T value);
+    bool full() const;
+    T mean() const;
+    T stddev() const;
+    std::span<const T> view() const;
+
+private:
+    std::array<T, N> buf_{};
+    std::size_t head_{0};
+    std::size_t count_{0};
+};
+```
+
+Default window sizes as `constexpr` constants so they are usable as template arguments:
+
+```cpp
+inline constexpr std::size_t kMaFastWindow  = 20;
+inline constexpr std::size_t kMaSlowWindow  = 100;
+inline constexpr std::size_t kMomWindow     = 60;
+inline constexpr std::size_t kVolWindow     = 20;
+
+// Usage — zero runtime cost, size known at compile time:
+RollingWindow<double, kMaFastWindow>  fast_ma;
+RollingWindow<double, kMaSlowWindow>  slow_ma;
+RollingWindow<double, kVolWindow>     vol_est;
 ```
 
 For ingestion-layer structs (`FuturesContract`, `RollEvent`, `MarketMacroObservation`, `ReleaseMacroObservation`), see `data_ingestion.md §6`.
@@ -418,7 +521,10 @@ Prefer `std::unique_ptr`, stack allocation, and references where ownership does 
 The queue and thread pool must be correct before they are fast. Priority: correctness → safety → clarity → performance.
 
 ### Templates
-Use templates where they make the design genuinely more reusable (`ThreadSafeQueue<T>`, `RollingWindow<T>`, indicator utilities). Do not force templates everywhere.
+Use templates where they make the design genuinely more reusable (`ThreadSafeQueue<T>`, `RollingWindow<T, N>`, indicator utilities). Do not force templates everywhere.
+
+### `constexpr` and `static_assert`
+Window sizes and universe constants are `constexpr` so they can serve as template arguments and are evaluated at compile time with zero runtime cost. `static_assert` in `RollingWindow<T, N>` validates template parameters and gives clear error messages — use this pattern wherever template preconditions exist.
 
 ### Error handling
 Use exceptions only where they help preserve invariants. Use RAII so partial failure does not leak resources. A failed experiment records `status = FAILED` with error message; the sweep continues.
@@ -469,7 +575,7 @@ After the MVP:
 - **Regime engine**: hidden Markov model over macro state vector
 - **Portfolio optimizer**: mean-variance or risk-parity extension
 - **Live adapters**: separate research-time simulation from live-trading abstractions
-- **Columnar storage**: in-memory feature store (columnar layout vs. row-based structs) for cache efficiency
+- **Columnar storage**: in-memory feature store (columnar layout vs. row-based structs) for cache efficiency — fields accessed together should live on the same cache lines; fields accessed independently should be padded to separate cache lines to avoid false sharing
 - **Caching**: processed feature panels cached between runs
 - **Factor model layer**: cross-sectional ranking, PCA, ridge signal combination
 - **Benchmark comparison**: equal-weight buy-and-hold as baseline

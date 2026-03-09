@@ -391,6 +391,26 @@ An experiment is a **fully specified, immutable research run**. Each experiment 
 
 Once launched, it has a unique ID and a fixed configuration. No result should exist without a config file.
 
+### Config Value Types
+
+Config parameter values use `std::variant` so a single `ConfigValue` type holds integers, doubles, strings, or booleans without a separate type per field:
+
+```cpp
+using ConfigValue = std::variant<int, double, std::string, bool>;
+
+struct ExperimentConfig {
+    std::unordered_map<std::string, ConfigValue> params;
+};
+
+// Reading a typed value with structured bindings:
+auto get_window = [&](const std::string& key) {
+    return std::get<int>(config.params.at(key));
+};
+int ma_fast = get_window("ma_fast");  // 20
+```
+
+`std::visit` can dispatch on the active type for serialization, validation, or sweep generation without casting.
+
 ### Required Configuration Fields
 
 **Metadata:** `experiment_name`, `experiment_id`, `description`, `author`, `created_at`, `random_seed`
@@ -476,6 +496,27 @@ regime_model ∈ {off, on}  ×  stress_threshold ∈ {low, medium, high}
 ```
 
 The first sweep should vary one model family at a time. Do not sweep data cleaning rules or multiple conflicting universes simultaneously.
+
+The sweep generator uses lambdas to build experiment lists without defining named functions for one-off transformations:
+
+```cpp
+// Build all combinations for sweep 1
+std::vector<ExperimentConfig> configs;
+for (int fast : {10, 20, 50})
+    for (int slow : {50, 100, 200})
+        for (int vol : {20, 40}) {
+            auto cfg = base_config;
+            cfg.params["ma_fast"]     = fast;
+            cfg.params["ma_slow"]     = slow;
+            cfg.params["vol_lookback"] = vol;
+            configs.push_back(cfg);
+        }
+
+// Submit all to thread pool with a capturing lambda
+auto futures = configs | std::views::transform([&pool](const auto& cfg) {
+    return pool.submit([cfg] { return run_experiment(cfg); });
+});
+```
 
 ### Multithreading
 
