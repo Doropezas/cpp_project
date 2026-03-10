@@ -9,32 +9,9 @@
 #include <type_traits>
 #include <vector>
 
-// RAII wrapper around std::thread that joins automatically on destruction.
-// This is what std::jthread does in C++20; we implement it manually here
-// because Apple's libc++ does not yet ship std::jthread.
-//
-// Invariant: the underlying thread is always joined before this object
-// is destroyed — no detached threads, no leaked handles.
-class JThread {
-public:
-    template<class F>
-    explicit JThread(F&& f) : thread_{std::forward<F>(f)} {}
-
-    ~JThread() { if (thread_.joinable()) thread_.join(); }
-
-    // Not copyable — owns a thread handle.
-    JThread(const JThread&)            = delete;
-    JThread& operator=(const JThread&) = delete;
-
-    // Movable so it can live in a std::vector.
-    JThread(JThread&&) noexcept            = default;
-    JThread& operator=(JThread&&) noexcept = default;
-
-private:
-    std::thread thread_;
-};
-
 // A fixed-size thread pool that executes submitted tasks concurrently.
+//
+// Uses std::jthread (C++20) — auto-joins on destruction, no manual join().
 //
 // Invariants:
 //   - Each submitted task runs exactly once
@@ -52,7 +29,7 @@ public:
     explicit ThreadPool(std::size_t num_threads);
 
     // Close the task queue and wait for all workers to finish.
-    // jthread destructors call join() automatically after the queue is closed.
+    // std::jthread destructors call join() automatically.
     ~ThreadPool();
 
     // Rule of five: not copyable or movable.
@@ -79,7 +56,7 @@ private:
     void worker_loop();
 
     ThreadSafeQueue<std::function<void()>> tasks_;
-    std::vector<JThread>                   workers_;
+    std::vector<std::jthread>              workers_;
 };
 
 // ── submit() — defined in header because it is a function template ─────────

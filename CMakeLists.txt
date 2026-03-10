@@ -1,4 +1,13 @@
 cmake_minimum_required(VERSION 3.20)
+
+# Use Homebrew GCC 15 for full C++20 support (std::jthread, etc.)
+# Apple's clang ships an incomplete libc++ that lacks std::jthread.
+set(CMAKE_C_COMPILER   /opt/homebrew/bin/gcc-15)
+set(CMAKE_CXX_COMPILER /opt/homebrew/bin/g++-15)
+
+# Point GCC at the macOS SDK so it can find system headers (stdint.h etc.)
+set(CMAKE_OSX_SYSROOT /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk)
+
 project(quant_research_engine CXX)
 
 set(CMAKE_CXX_STANDARD 20)
