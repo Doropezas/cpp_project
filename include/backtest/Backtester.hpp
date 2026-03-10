@@ -16,7 +16,8 @@ class MacroPanel;
 class RegimeClassifier;
 
 // Single-symbol daily position record produced during a backtest.
-struct DailyPosition {
+struct DailyPosition
+{
     std::string date;
     std::string symbol;
     double position{0.0};     // final normalized weight [-1, +1] (single-symbol path)
@@ -46,39 +47,41 @@ struct DailyPosition {
 // Usage:
 //   Backtester bt;
 //   auto [positions, metrics] = bt.run(bars, "my_label");
-//   // With regime:
+// With regime:
 //   auto [positions, metrics] = bt.run(bars, "regime_label", &macro_panel, &regime_clf);
 
-class Backtester {
+class Backtester
+{
 public:
     // Signal parameters default to Constants.hpp baseline values.
-    explicit Backtester(std::size_t ma_fast   = kMaFastWindow,
-                        std::size_t ma_slow   = kMaSlowWindow,
-                        std::size_t mom_lb    = kMomLookback,
-                        std::size_t mom_skip  = kMomSkip);
+    explicit Backtester(std::size_t ma_fast = kMaFastWindow,
+                        std::size_t ma_slow = kMaSlowWindow,
+                        std::size_t mom_lb = kMomLookback,
+                        std::size_t mom_skip = kMomSkip);
 
     // Run the backtest over the provided bars (single symbol, chronological order).
     // Returns the per-day position log and aggregate metrics.
     //
     // macro   — if non-null, macro state Z_t is looked up by date for each bar.
     // regime  — if non-null (and macro non-null), regime probabilities scale positions.
-    struct RunResult {
+    struct RunResult
+    {
         std::vector<DailyPosition> positions;
-        PerformanceMetrics         metrics;
+        PerformanceMetrics metrics;
     };
 
     [[nodiscard]] RunResult run(std::span<const DailyBar> bars,
-                                const std::string& label = "",
-                                const MacroPanel* macro = nullptr,
-                                const RegimeClassifier* regime = nullptr) const;
+                                const std::string &label = "",
+                                const MacroPanel *macro = nullptr,
+                                const RegimeClassifier *regime = nullptr) const;
 
     // Public: compute metrics from any position log (used for IS/OOS split reporting).
     [[nodiscard]] static PerformanceMetrics
-    compute_metrics(const std::vector<DailyPosition>& positions,
-                    const std::string& label);
+    compute_metrics(const std::vector<DailyPosition> &positions,
+                    const std::string &label);
 
 private:
     MovingAverageSignal ma_signal_;
-    MomentumSignal      mom_signal_;
-    VolatilitySignal    vol_signal_;
+    MomentumSignal mom_signal_;
+    VolatilitySignal vol_signal_;
 };
