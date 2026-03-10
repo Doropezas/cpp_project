@@ -9,7 +9,7 @@
 // RegimeClassifier
 //
 // Classifies the current macro environment into one of four regimes
-// (RESEARCH.md §9) and returns the probability of each regime via softmax.
+// (RESEARCH.md) and returns the probability of each regime via softmax.
 //
 // Regimes:
 //   0  Risk-On       — equity bull, tight spreads, low volatility

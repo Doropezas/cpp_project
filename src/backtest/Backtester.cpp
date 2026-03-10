@@ -34,7 +34,7 @@ Backtester::RunResult Backtester::run(std::span<const DailyBar> bars,
         // Signals computed on bars[0..t] (inclusive), i.e. using close[t] as latest.
         auto window = bars.subspan(0, t + 1);
 
-        const auto ma_r  = ma_signal_.compute(window);
+        const auto ma_r = ma_signal_.compute(window);
         const auto mom_r = mom_signal_.compute(window);
         const auto vol_r = vol_signal_.compute(window);
 
@@ -72,14 +72,14 @@ Backtester::RunResult Backtester::run(std::span<const DailyBar> bars,
         cum_pnl += daily_pnl;
 
         DailyPosition dp;
-        dp.date         = bars[t + 1].date;
-        dp.symbol       = bars[t + 1].symbol;
-        dp.position     = position;
-        dp.pnl          = daily_pnl;
-        dp.cum_pnl      = cum_pnl;
-        dp.raw_signal   = raw_signal;
-        dp.vol_estimate = vol_r.value;   // 0.0 if not yet valid
-        dp.return_1d    = bars[t + 1].return_1d;
+        dp.date = bars[t + 1].date;
+        dp.symbol = bars[t + 1].symbol;
+        dp.position = position;
+        dp.pnl = daily_pnl;
+        dp.cum_pnl = cum_pnl;
+        dp.raw_signal = raw_signal;
+        dp.vol_estimate = vol_r.value; // 0.0 if not yet valid
+        dp.return_1d = bars[t + 1].return_1d;
 
         result.positions.push_back(dp);
     }
@@ -88,14 +88,14 @@ Backtester::RunResult Backtester::run(std::span<const DailyBar> bars,
     return result;
 }
 
-// ── compute_metrics ───────────────────────────────────────────────────────────
+// Metrics
 
 PerformanceMetrics Backtester::compute_metrics(
     const std::vector<DailyPosition> &positions,
     const std::string &label)
 {
     PerformanceMetrics m;
-    m.label    = label;
+    m.label = label;
     m.num_days = static_cast<int>(positions.size());
 
     if (positions.empty())
@@ -108,8 +108,7 @@ PerformanceMetrics Backtester::compute_metrics(
         pnls.push_back(dp.pnl);
 
     // Mean and stddev of daily PnL
-    const double mean_pnl = std::accumulate(pnls.begin(), pnls.end(), 0.0)
-                            / static_cast<double>(pnls.size());
+    const double mean_pnl = std::accumulate(pnls.begin(), pnls.end(), 0.0) / static_cast<double>(pnls.size());
 
     double variance = 0.0;
     for (double p : pnls)
@@ -124,26 +123,29 @@ PerformanceMetrics Backtester::compute_metrics(
     m.total_return = positions.back().cum_pnl;
 
     // Max drawdown: largest peak-to-trough drop in cumulative PnL
-    double peak   = 0.0;
+    double peak = 0.0;
     double max_dd = 0.0;
     double running_cum = 0.0;
     for (const auto &dp : positions)
     {
         running_cum = dp.cum_pnl;
-        if (running_cum > peak) peak = running_cum;
+        if (running_cum > peak)
+            peak = running_cum;
         const double dd = running_cum - peak;
-        if (dd < max_dd) max_dd = dd;
+        if (dd < max_dd)
+            max_dd = dd;
     }
     m.max_drawdown = max_dd;
 
     // Hit ratio: fraction of days with pnl > 0
     const double hits = static_cast<double>(
-        std::count_if(pnls.begin(), pnls.end(), [](double p) { return p > 0.0; }));
+        std::count_if(pnls.begin(), pnls.end(), [](double p)
+                      { return p > 0.0; }));
     m.hit_ratio = hits / static_cast<double>(pnls.size());
 
     // Turnover: mean absolute daily position change
     double total_turnover = 0.0;
-    double prev_pos       = 0.0;
+    double prev_pos = 0.0;
     for (const auto &dp : positions)
     {
         total_turnover += std::abs(dp.position - prev_pos);

@@ -10,11 +10,37 @@ Threads for parallel symbol processing, queues for the data pipeline, templates 
 # Build
 cmake -S . -B build && cmake --build build
 
-# Run on included data (no download needed)
-./build/quant_engine data/processed/continuous
-
 # Run tests
 ctest --test-dir build
+```
+
+## Run
+
+```bash
+# Baseline — trend signals, inv-vol portfolio, IS/OOS split
+./build/quant_engine data/processed/continuous
+
+# With regime model — macro-state-weighted positions
+./build/quant_engine data/processed/continuous --regime --id regime_v1
+
+# Custom experiment ID (artifacts written to output/<id>/)
+./build/quant_engine data/processed/continuous --id my_run
+```
+
+Expected output (baseline):
+
+```
+=== Portfolio (inv-vol cross-symbol) ===
+  portfolio_inv_vol   sharpe=  0.018  ret= 0.0179  ...
+
+=== IS / OOS Split (split date: 2021-12-31) ===
+SYM       IS-SHP   OOS-SHP  ...
+----------------------------------------------
+6E        -0.102     0.063  ...
+ES        -0.226    -0.070  ...
+GC         0.067     0.419  ...
+...
+AVG       -0.042     0.073
 ```
 
 ## What it does
@@ -52,11 +78,12 @@ CSVLoader → MarketDataLoader → Backtester ← SignalEngine
 
 Included in the repo (`data/`):
 - `processed/continuous/` — Panama back-adjusted daily bars, 2010–2026
+- `raw/databento/` — 9 Futures series from Databento
 - `raw/fred/` — 9 FRED macro series (yields, spreads, stress index)
 - `raw/vix/` — CBOE VIX daily closes
 
 ## Docs
 
-- [ARCHITECTURE.md](Architechture.md) — system design, concurrency model, module interfaces
-- [RESEARCH.md](Research.md) — signals, portfolio construction, macro regime model
+- [ARCHITECTURE.md](ARCHITECTURE.md) — system design, concurrency model, module interfaces
+- [RESEARCH.md](RESEARCH.md) — signals, portfolio construction, macro regime model
 - [data_ingestion.md](data_ingestion.md) — data pipeline, Panama adjustment algorithm

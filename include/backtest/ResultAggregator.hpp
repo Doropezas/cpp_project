@@ -17,7 +17,7 @@
 // std::scoped_lock (two mutexes: one for the per-symbol map, one for the
 // aggregate metrics vector).
 //
-// Concurrency pattern (ARCHITECTURE.md §3.5):
+// Concurrency pattern (ARCHITECTURE.md):
 //   std::scoped_lock lock{map_mutex_, metrics_mutex_};   // deadlock-safe
 //
 // Usage:

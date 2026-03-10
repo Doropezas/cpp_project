@@ -9,7 +9,7 @@
 
 // Moving Average Crossover signal.
 //
-// Signal logic (from RESEARCH.md §5.1):
+// Signal logic (from RESEARCH.md):
 //   MA_fast(t) = mean(close[t - fast + 1 .. t])
 //   MA_slow(t) = mean(close[t - slow + 1 .. t])
 //
@@ -20,7 +20,8 @@
 //
 // Returns valid = false when bars.size() < slow_window.
 
-class MovingAverageSignal {
+class MovingAverageSignal
+{
 public:
     // Default constructor uses baseline constexpr values from Constants.hpp
     MovingAverageSignal() = default;

@@ -10,7 +10,7 @@
 // Realized volatility estimator.
 //
 // Not a directional signal — produces an annualized volatility estimate
-// used for inverse-volatility position sizing (RESEARCH.md §6).
+// used for inverse-volatility position sizing (RESEARCH.md 6).
 //
 // Internally uses RollingWindow<double, kVolWindow> to demonstrate
 // the compile-time window template with static_assert validation.
@@ -23,7 +23,8 @@
 //
 // Returns valid = false when bars.size() < window + 1.
 
-class VolatilitySignal {
+class VolatilitySignal
+{
 public:
     // Window is fixed to kVolWindow at compile time for RollingWindow<>.
     // A runtime parameter is accepted for configuration flexibility but

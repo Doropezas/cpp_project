@@ -11,7 +11,7 @@
 
 // A fixed-size thread pool that executes submitted tasks concurrently.
 //
-// Uses std::jthread (C++20) — auto-joins on destruction, no manual join().
+// Uses std::jthread (C++20)
 //
 // Invariants:
 //   - Each submitted task runs exactly once

@@ -6,7 +6,7 @@
 
 // ExperimentConfig
 //
-// All parameters that define one backtest run (RESEARCH.md §12).
+// All parameters that define one backtest run (RESEARCH.md).
 //
 // Constructed from command-line arguments in main.cpp.
 // Each field has a documented default matching the baseline from RESEARCH.md §13.
@@ -25,16 +25,16 @@
 
 struct ExperimentConfig
 {
-    std::string id         {"baseline"};
-    std::string data_path  {"data/processed/continuous"};
-    std::string macro_path {"data/processed/macro/macro_panel.csv"};
-    std::string output_dir {"output"};
-    std::string split_date {std::string(kISSplitDate)};
+    std::string id{"baseline"};
+    std::string data_path{"data/processed/continuous"};
+    std::string macro_path{"data/processed/macro/macro_panel.csv"};
+    std::string output_dir{"output"};
+    std::string split_date{std::string(kISSplitDate)};
 
-    std::size_t ma_fast  {kMaFastWindow};
-    std::size_t ma_slow  {kMaSlowWindow};
-    std::size_t mom_lb   {kMomLookback};
-    std::size_t mom_skip {kMomSkip};
+    std::size_t ma_fast{kMaFastWindow};
+    std::size_t ma_slow{kMaSlowWindow};
+    std::size_t mom_lb{kMomLookback};
+    std::size_t mom_skip{kMomSkip};
 
     bool use_regime{false};
 };

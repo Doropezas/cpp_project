@@ -5,34 +5,30 @@
 #include <numeric>
 #include <vector>
 
-// ── Constructor ───────────────────────────────────────────────────────────────
-
-ResultAggregator::ResultAggregator(ThreadPool& pool, const Backtester& backtester)
+ResultAggregator::ResultAggregator(ThreadPool &pool, const Backtester &backtester)
     : pool_{pool}, bt_{backtester}
-{}
+{
+}
 
-// ── add_symbol() ──────────────────────────────────────────────────────────────
-
-void ResultAggregator::add_symbol(const std::string& symbol,
+void ResultAggregator::add_symbol(const std::string &symbol,
                                   std::vector<DailyBar> bars,
-                                  const std::string& label)
+                                  const std::string &label)
 {
     // Capture bars by move into the task lambda; symbol/label by value.
     // bt_ is captured by reference — Backtester is const and stateless.
     auto future = pool_.submit(
-        [this, symbol, label, bars = std::move(bars)]() mutable {
+        [this, symbol, label, bars = std::move(bars)]() mutable
+        {
             return bt_.run(bars, label.empty() ? symbol : label);
-        }
-    );
+        });
 
     pending_.push_back({symbol, std::move(future)});
 }
 
-// ── wait_all() ────────────────────────────────────────────────────────────────
-
 void ResultAggregator::wait_all()
 {
-    for (auto& job : pending_) {
+    for (auto &job : pending_)
+    {
         // Block until this symbol's run is complete.
         Backtester::RunResult result = job.future.get();
 
@@ -46,42 +42,41 @@ void ResultAggregator::wait_all()
     pending_.clear();
 }
 
-// ── portfolio_summary() ───────────────────────────────────────────────────────
-
-PerformanceMetrics ResultAggregator::portfolio_summary(const std::string& label) const
+PerformanceMetrics ResultAggregator::portfolio_summary(const std::string &label) const
 {
     std::scoped_lock lock{map_mutex_, metrics_mutex_};
 
     PerformanceMetrics summary;
     summary.label = label;
 
-    if (metrics_.empty()) return summary;
+    if (metrics_.empty())
+        return summary;
 
     const double n = static_cast<double>(metrics_.size());
 
     // Equal-weighted average of each per-symbol metric.
-    for (const auto& m : metrics_) {
-        summary.sharpe       += m.sharpe;
+    for (const auto &m : metrics_)
+    {
+        summary.sharpe += m.sharpe;
         summary.max_drawdown += m.max_drawdown;
-        summary.hit_ratio    += m.hit_ratio;
-        summary.turnover     += m.turnover;
+        summary.hit_ratio += m.hit_ratio;
+        summary.turnover += m.turnover;
         summary.total_return += m.total_return;
-        summary.num_days     += m.num_days;
+        summary.num_days += m.num_days;
     }
 
-    summary.sharpe       /= n;
+    summary.sharpe /= n;
     summary.max_drawdown /= n;
-    summary.hit_ratio    /= n;
-    summary.turnover     /= n;
+    summary.hit_ratio /= n;
+    summary.turnover /= n;
     summary.total_return /= n;
-    summary.num_days      = static_cast<int>(static_cast<double>(summary.num_days) / n);
+    summary.num_days = static_cast<int>(static_cast<double>(summary.num_days) / n);
 
     return summary;
 }
 
-// ── portfolio_pnl() ───────────────────────────────────────────────────────────
 //
-// Cross-symbol inverse-volatility portfolio (RESEARCH.md §6).
+// Cross-symbol inverse-volatility portfolio (RESEARCH.md).
 //
 // For each trading day t shared by at least one symbol:
 //   - Collect symbols with a valid vol estimate on day t (vol_estimate > 0)
@@ -94,16 +89,18 @@ PerformanceMetrics ResultAggregator::portfolio_summary(const std::string& label)
 // All dates are processed in chronological order (std::map).
 // Returns PerformanceMetrics for the cross-symbol portfolio PnL series.
 
-PerformanceMetrics ResultAggregator::portfolio_pnl(const std::string& label) const
+PerformanceMetrics ResultAggregator::portfolio_pnl(const std::string &label) const
 {
     std::scoped_lock lock{map_mutex_, metrics_mutex_};
 
     // Collect all DailyPosition records across all symbols, indexed by date.
     // Use std::map for chronological order (YYYY-MM-DD sorts lexicographically).
-    std::map<std::string, std::vector<const DailyPosition*>> by_date;
+    std::map<std::string, std::vector<const DailyPosition *>> by_date;
 
-    for (const auto& [sym, run] : results_) {
-        for (const auto& dp : run.positions) {
+    for (const auto &[sym, run] : results_)
+    {
+        for (const auto &dp : run.positions)
+        {
             by_date[dp.date].push_back(&dp);
         }
     }
@@ -119,37 +116,42 @@ PerformanceMetrics ResultAggregator::portfolio_pnl(const std::string& label) con
 
     double cum_pnl = 0.0;
 
-    for (const auto& [date, positions] : by_date) {
+    for (const auto &[date, positions] : by_date)
+    {
         // Only use positions where vol is valid.
         double sum_inv_vol = 0.0;
-        for (const auto* dp : positions) {
+        for (const auto *dp : positions)
+        {
             if (dp->vol_estimate > 0.0)
                 sum_inv_vol += 1.0 / dp->vol_estimate;
         }
 
         double day_pnl = 0.0;
-        double day_pos = 0.0;  // aggregate position magnitude for turnover
+        double day_pos = 0.0; // aggregate position magnitude for turnover
 
-        if (sum_inv_vol > 0.0) {
-            for (const auto* dp : positions) {
-                if (dp->vol_estimate <= 0.0) continue;
+        if (sum_inv_vol > 0.0)
+        {
+            for (const auto *dp : positions)
+            {
+                if (dp->vol_estimate <= 0.0)
+                    continue;
 
-                const double w         = (1.0 / dp->vol_estimate) / sum_inv_vol;
-                const double direction = dp->raw_signal / 2.0;  // [-1, +1]
-                const double pos_i     = direction * w;
+                const double w = (1.0 / dp->vol_estimate) / sum_inv_vol;
+                const double direction = dp->raw_signal / 2.0; // [-1, +1]
+                const double pos_i = direction * w;
 
                 day_pnl += pos_i * dp->return_1d;
-                day_pos  += std::abs(pos_i);
+                day_pos += std::abs(pos_i);
             }
         }
 
         cum_pnl += day_pnl;
 
         DailyPosition dp;
-        dp.date     = date;
-        dp.pnl      = day_pnl;
-        dp.cum_pnl  = cum_pnl;
-        dp.position = day_pos;   // aggregate |position| used for turnover calc
+        dp.date = date;
+        dp.pnl = day_pnl;
+        dp.cum_pnl = cum_pnl;
+        dp.position = day_pos; // aggregate |position| used for turnover calc
         port_positions.push_back(dp);
     }
 

@@ -56,7 +56,7 @@ RegimeClassifier::RegimeClassifier()
     };
 }
 
-// ── softmax ───────────────────────────────────────────────────────────────────
+// Softmax
 
 std::array<double, 4> RegimeClassifier::softmax(const std::array<double, 4> &scores)
 {
@@ -72,7 +72,7 @@ std::array<double, 4> RegimeClassifier::softmax(const std::array<double, 4> &sco
     return exp_s;
 }
 
-// ── classify ──────────────────────────────────────────────────────────────────
+// Classify
 
 RegimeProbabilities RegimeClassifier::classify(const MacroFeatures &z) const
 {
@@ -92,7 +92,7 @@ RegimeProbabilities RegimeClassifier::classify(const MacroFeatures &z) const
     return rp;
 }
 
-// ── signal_scalar ─────────────────────────────────────────────────────────────
+// Signal scalar
 
 double RegimeClassifier::signal_scalar(const MacroFeatures &z) const
 {
@@ -103,7 +103,7 @@ double RegimeClassifier::signal_scalar(const MacroFeatures &z) const
     return scalar;
 }
 
-// ── RegimeProbabilities::dominant ────────────────────────────────────────────
+// Regime prob
 
 int RegimeProbabilities::dominant() const
 {

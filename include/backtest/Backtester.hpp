@@ -32,7 +32,7 @@ struct DailyPosition
 //
 // Runs a daily signal → position → PnL loop over a bar series.
 //
-// Design decisions (RESEARCH.md §3, §5, §6):
+// Design decisions (RESEARCH.md):
 //   • EOD timing: signals on close[t] → position taken at close[t] → PnL = position * return_1d[t+1]
 //   • Inverse-volatility sizing: weight_i = (1/sigma_i) / sum_j(1/sigma_j)
 //     where sigma_i = VolatilitySignal on the window ending at day t
@@ -40,7 +40,7 @@ struct DailyPosition
 //   • Zero transaction costs in baseline (RESEARCH.md §6)
 //   • Returns valid = false until all signals have sufficient warmup bars
 //
-// Optional regime scaling (RESEARCH.md §9):
+// Optional regime scaling (RESEARCH.md):
 //   If macro and regime pointers are non-null, each day's position is scaled by
 //   the regime-weighted signal scalar computed from the current macro state Z_t.
 //
@@ -59,11 +59,6 @@ public:
                         std::size_t mom_lb = kMomLookback,
                         std::size_t mom_skip = kMomSkip);
 
-    // Run the backtest over the provided bars (single symbol, chronological order).
-    // Returns the per-day position log and aggregate metrics.
-    //
-    // macro   — if non-null, macro state Z_t is looked up by date for each bar.
-    // regime  — if non-null (and macro non-null), regime probabilities scale positions.
     struct RunResult
     {
         std::vector<DailyPosition> positions;
