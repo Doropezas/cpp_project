@@ -7,9 +7,10 @@ secrets/
 # Build directory
 build/
 
-# Downloaded market data — large files, not for version control
-data/raw/
-data/processed/
+# Raw Databento data — licensed source files, do not redistribute
+data/raw/databento/
+
+# Build artifacts
 data/manifests/
 
 # Prerequisites
