@@ -20,7 +20,7 @@ struct DailyPosition {
     double cum_pnl{0.0};    // cumulative PnL up to and including this day
 };
 
-// Backtester — Stage 5
+// Backtester
 //
 // Runs a daily signal → position → PnL loop over a bar series.
 //

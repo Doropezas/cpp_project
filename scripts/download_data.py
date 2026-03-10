@@ -35,36 +35,36 @@ from pathlib import Path
 
 import requests
 
-# ── Configuration ─────────────────────────────────────────────────────────────
+# Config
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-RAW_DIR      = PROJECT_ROOT / "data" / "raw"
+RAW_DIR = PROJECT_ROOT / "data" / "raw"
 
 # 9-symbol baseline universe (RESEARCH.md §2)
 # Maps symbol root → Databento continuous front-month instrument id pattern
 FUTURES_SYMBOLS = {
-    "ES":  "ES.c.0",   # S&P 500 E-mini
-    "NQ":  "NQ.c.0",   # Nasdaq 100 E-mini
-    "YM":  "YM.c.0",   # Dow Jones E-mini
-    "ZN":  "ZN.c.0",   # 10-Year T-Note
-    "ZB":  "ZB.c.0",   # 30-Year T-Bond
-    "GC":  "GC.c.0",   # Gold
-    "CL":  "CL.c.0",   # Crude Oil (WTI)
-    "6E":  "6E.c.0",   # Euro FX
-    "6J":  "6J.c.0",   # Japanese Yen
+    "ES": "ES.c.0",  # S&P 500 E-mini
+    "NQ": "NQ.c.0",  # Nasdaq 100 E-mini
+    "YM": "YM.c.0",  # Dow Jones E-mini
+    "ZN": "ZN.c.0",  # 10-Year T-Note
+    "ZB": "ZB.c.0",  # 30-Year T-Bond
+    "GC": "GC.c.0",  # Gold
+    "CL": "CL.c.0",  # Crude Oil (WTI)
+    "6E": "6E.c.0",  # Euro FX
+    "6J": "6J.c.0",  # Japanese Yen
 }
 
 # FRED series (RESEARCH.md §8)
 FRED_SERIES = {
-    "DGS2":      "2-Year Treasury Yield",
-    "DGS10":     "10-Year Treasury Yield",
-    "T10Y3M":    "10Y-3M Treasury Spread",
-    "T10YIE":    "10-Year Breakeven Inflation",
-    "DFII10":    "10-Year TIPS Yield",
-    "BAA10Y":    "BAA-10Y Credit Spread",
-    "DTWEXBGS":  "USD Broad Trade-Weighted Index",
-    "STLFSI4":   "St. Louis Fed Stress Index",
-    "WALCL":     "Fed Balance Sheet (Total Assets)",
+    "DGS2": "2-Year Treasury Yield",
+    "DGS10": "10-Year Treasury Yield",
+    "T10Y3M": "10Y-3M Treasury Spread",
+    "T10YIE": "10-Year Breakeven Inflation",
+    "DFII10": "10-Year TIPS Yield",
+    "BAA10Y": "BAA-10Y Credit Spread",
+    "DTWEXBGS": "USD Broad Trade-Weighted Index",
+    "STLFSI4": "St. Louis Fed Stress Index",
+    "WALCL": "Fed Balance Sheet (Total Assets)",
 }
 
 FRED_BASE = "https://fred.stlouisfed.org/graph/fredgraph.csv"
@@ -72,12 +72,13 @@ FRED_BASE = "https://fred.stlouisfed.org/graph/fredgraph.csv"
 # VIX — CBOE direct download (no API key)
 VIX_URL = "https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv"
 
-DEFAULT_START         = "2010-06-06"   # GLBX.MDP3 available from 2010-06-06
-DEFAULT_START_MACRO   = "2010-01-01"   # FRED/VIX available from earlier
-DEFAULT_END   = date.today().isoformat()
+DEFAULT_START = "2010-06-06"  # GLBX.MDP3 available from 2010-06-06
+DEFAULT_START_MACRO = "2010-01-01"  # FRED/VIX available from earlier
+DEFAULT_END = date.today().isoformat()
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# Helpers
+
 
 def require_env(var: str) -> str:
     """Read an env var; abort with a clear message if missing or empty."""
@@ -95,8 +96,7 @@ def ensure_dir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
 
-def fred_csv_url(series_id: str, api_key: str,
-                 start: str, end: str) -> str:
+def fred_csv_url(series_id: str, api_key: str, start: str, end: str) -> str:
     return (
         f"https://fred.stlouisfed.org/graph/fredgraph.csv"
         f"?id={series_id}"
@@ -104,50 +104,63 @@ def fred_csv_url(series_id: str, api_key: str,
     )
 
 
-# ── Futures download (Databento) ──────────────────────────────────────────────
+# Databento
 
-def _download_one_symbol(sym: str, start: str, end: str,
-                         databento_key: str, out_dir: Path) -> str:
+
+def _download_one_symbol(
+    sym: str, start: str, end: str, databento_key: str, out_dir: Path
+) -> str:
     """Download one futures symbol. Returns a status string for printing."""
     import databento as db
     import warnings
 
     instrument = FUTURES_SYMBOLS[sym]
-    out_path   = out_dir / f"{sym}.csv"
+    out_path = out_dir / f"{sym}.csv"
 
     if out_path.exists():
         return f"  [skip] {sym} — already downloaded"
 
     try:
-        client = db.Historical(databento_key)  # one client per thread (not thread-safe to share)
+        client = db.Historical(
+            databento_key
+        )  # one client per thread (not thread-safe to share)
         with warnings.catch_warnings():
-            warnings.simplefilter("ignore")    # suppress degraded-quality BentoWarnings
+            warnings.simplefilter("ignore")  # suppress degraded-quality BentoWarnings
             data = client.timeseries.get_range(
-                dataset  = "GLBX.MDP3",
-                schema   = "ohlcv-1d",
-                symbols  = [instrument],
-                stype_in = "continuous",
-                start    = start,
-                end      = end,
+                dataset="GLBX.MDP3",
+                schema="ohlcv-1d",
+                symbols=[instrument],
+                stype_in="continuous",
+                start=start,
+                end=end,
             )
         df = data.to_df()
 
         with open(out_path, "w", newline="") as f:
             writer = csv.writer(f)
-            writer.writerow(["symbol", "date", "open", "high", "low", "close", "volume"])
+            writer.writerow(
+                ["symbol", "date", "open", "high", "low", "close", "volume"]
+            )
             for ts, row in df.iterrows():
-                writer.writerow([
-                    sym, str(ts)[:10],
-                    row["open"], row["high"], row["low"], row["close"],
-                    int(row["volume"]),
-                ])
+                writer.writerow(
+                    [
+                        sym,
+                        str(ts)[:10],
+                        row["open"],
+                        row["high"],
+                        row["low"],
+                        row["close"],
+                        int(row["volume"]),
+                    ]
+                )
         return f"  OK  {sym:4s} — {len(df)} bars"
     except Exception as e:
         return f"  FAIL {sym:4s} — {e}"
 
 
-def download_futures(symbols: list[str], start: str, end: str,
-                     databento_key: str) -> None:
+def download_futures(
+    symbols: list[str], start: str, end: str, databento_key: str
+) -> None:
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     out_dir = RAW_DIR / "databento"
@@ -156,14 +169,17 @@ def download_futures(symbols: list[str], start: str, end: str,
     print(f"  Fetching {len(symbols)} symbols in parallel ...")
     with ThreadPoolExecutor(max_workers=len(symbols)) as pool:
         futures = {
-            pool.submit(_download_one_symbol, sym, start, end, databento_key, out_dir): sym
+            pool.submit(
+                _download_one_symbol, sym, start, end, databento_key, out_dir
+            ): sym
             for sym in symbols
         }
         for fut in as_completed(futures):
             print(fut.result(), flush=True)
 
 
-# ── Macro download (FRED) ─────────────────────────────────────────────────────
+# FRED
+
 
 def download_fred(start: str, end: str, fred_key: str) -> None:
     out_dir = RAW_DIR / "fred"
@@ -183,11 +199,11 @@ def download_fred(start: str, end: str, fred_key: str) -> None:
             resp = requests.get(
                 fred_api_base,
                 params={
-                    "series_id":         series_id,
+                    "series_id": series_id,
                     "observation_start": start,
-                    "observation_end":   end,
-                    "api_key":           fred_key,
-                    "file_type":         "json",
+                    "observation_end": end,
+                    "api_key": fred_key,
+                    "file_type": "json",
                 },
                 timeout=30,
             )
@@ -209,10 +225,11 @@ def download_fred(start: str, end: str, fred_key: str) -> None:
             print(f"FAILED: {e}")
 
 
-# ── VIX download (CBOE, no key) ───────────────────────────────────────────────
+# VIX
+
 
 def download_vix(start: str) -> None:
-    out_dir  = RAW_DIR / "vix"
+    out_dir = RAW_DIR / "vix"
     out_path = out_dir / "VIX.csv"
     ensure_dir(out_dir)
 
@@ -231,8 +248,11 @@ def download_vix(start: str) -> None:
             return f"{y}-{m.zfill(2)}-{day.zfill(2)}"
 
         reader = csv.DictReader(io.StringIO(resp.text))
-        rows   = [(cboe_to_iso(r["DATE"]), r["CLOSE"])
-                  for r in reader if cboe_to_iso(r["DATE"]) >= start]
+        rows = [
+            (cboe_to_iso(r["DATE"]), r["CLOSE"])
+            for r in reader
+            if cboe_to_iso(r["DATE"]) >= start
+        ]
 
         with open(out_path, "w", newline="") as f:
             writer = csv.writer(f)
@@ -244,20 +264,32 @@ def download_vix(start: str) -> None:
         print(f"FAILED: {e}")
 
 
-# ── Entry point ───────────────────────────────────────────────────────────────
+# Entry Point
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Download market and macro data")
-    parser.add_argument("--start",       default=DEFAULT_START,       help="Futures start date YYYY-MM-DD")
-    parser.add_argument("--start-macro", default=DEFAULT_START_MACRO, help="Macro/VIX start date YYYY-MM-DD")
-    parser.add_argument("--end",         default=DEFAULT_END,         help="End date YYYY-MM-DD")
-    parser.add_argument("--symbols", nargs="+",
-                        default=list(FUTURES_SYMBOLS.keys()),
-                        choices=list(FUTURES_SYMBOLS.keys()),
-                        help="Subset of symbols to download")
-    parser.add_argument("--skip-futures", action="store_true", help="Skip Databento download")
-    parser.add_argument("--skip-fred",    action="store_true", help="Skip FRED download")
-    parser.add_argument("--skip-vix",     action="store_true", help="Skip VIX download")
+    parser.add_argument(
+        "--start", default=DEFAULT_START, help="Futures start date YYYY-MM-DD"
+    )
+    parser.add_argument(
+        "--start-macro",
+        default=DEFAULT_START_MACRO,
+        help="Macro/VIX start date YYYY-MM-DD",
+    )
+    parser.add_argument("--end", default=DEFAULT_END, help="End date YYYY-MM-DD")
+    parser.add_argument(
+        "--symbols",
+        nargs="+",
+        default=list(FUTURES_SYMBOLS.keys()),
+        choices=list(FUTURES_SYMBOLS.keys()),
+        help="Subset of symbols to download",
+    )
+    parser.add_argument(
+        "--skip-futures", action="store_true", help="Skip Databento download"
+    )
+    parser.add_argument("--skip-fred", action="store_true", help="Skip FRED download")
+    parser.add_argument("--skip-vix", action="store_true", help="Skip VIX download")
     args = parser.parse_args()
 
     # Load .env if it exists (simple key=value parser, no shell required)

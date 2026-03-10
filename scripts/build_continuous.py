@@ -37,17 +37,17 @@ import math
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-RAW_DIR      = PROJECT_ROOT / "data" / "raw"  / "databento"
-OUT_DIR      = PROJECT_ROOT / "data" / "processed" / "continuous"
+RAW_DIR = PROJECT_ROOT / "data" / "raw" / "databento"
+OUT_DIR = PROJECT_ROOT / "data" / "processed" / "continuous"
 
 SYMBOLS = ["ES", "NQ", "YM", "ZN", "ZB", "GC", "CL", "6E", "6J"]
 
-# A gap larger than this many rolling-20-day standard deviations of log-returns
 # is classified as a roll event (price discontinuity, not a real move).
 DEFAULT_ROLL_SIGMA = 4.0
 
 
-# ── Data loading ──────────────────────────────────────────────────────────────
+# Data Loading
+
 
 def load_raw(sym: str) -> list[dict]:
     """Load raw CSV into list of dicts, sorted by date."""
@@ -63,7 +63,8 @@ def load_raw(sym: str) -> list[dict]:
     return rows
 
 
-# ── Roll detection ────────────────────────────────────────────────────────────
+# Rol detection
+
 
 def detect_rolls(rows: list[dict], sigma_threshold: float) -> list[int]:
     """
@@ -74,7 +75,7 @@ def detect_rolls(rows: list[dict], sigma_threshold: float) -> list[int]:
     as a roll date. The first 20 bars (warmup) are never flagged.
     """
     closes = [float(r["close"]) for r in rows]
-    n      = len(closes)
+    n = len(closes)
     window = 20
     roll_indices: list[int] = []
 
@@ -85,9 +86,9 @@ def detect_rolls(rows: list[dict], sigma_threshold: float) -> list[int]:
 
     for i in range(window, n):
         recent = log_rets[i - window : i]
-        mean   = sum(recent) / window
-        var    = sum((x - mean) ** 2 for x in recent) / window
-        std    = math.sqrt(var) if var > 0 else 0.0
+        mean = sum(recent) / window
+        var = sum((x - mean) ** 2 for x in recent) / window
+        std = math.sqrt(var) if var > 0 else 0.0
 
         if std > 0 and abs(log_rets[i]) > sigma_threshold * std:
             roll_indices.append(i)
@@ -95,7 +96,8 @@ def detect_rolls(rows: list[dict], sigma_threshold: float) -> list[int]:
     return roll_indices
 
 
-# ── Panama back-adjustment ────────────────────────────────────────────────────
+# Panama adjustment
+
 
 def panama_adjust(rows: list[dict], roll_indices: list[int]) -> list[dict]:
     """
@@ -108,11 +110,11 @@ def panama_adjust(rows: list[dict], roll_indices: list[int]) -> list[dict]:
     Also computes log return_1d on the adjusted series.
     """
     # Work with float copies of price columns
-    opens   = [float(r["open"])   for r in rows]
-    highs   = [float(r["high"])   for r in rows]
-    lows    = [float(r["low"])    for r in rows]
-    closes  = [float(r["close"])  for r in rows]
-    raw_cls = closes[:]   # keep unadjusted copy
+    opens = [float(r["open"]) for r in rows]
+    highs = [float(r["high"]) for r in rows]
+    lows = [float(r["low"]) for r in rows]
+    closes = [float(r["close"]) for r in rows]
+    raw_cls = closes[:]  # keep unadjusted copy
 
     is_roll = [False] * len(rows)
     for idx in roll_indices:
@@ -122,9 +124,9 @@ def panama_adjust(rows: list[dict], roll_indices: list[int]) -> list[dict]:
     for idx in sorted(roll_indices, reverse=True):
         gap = closes[idx] - closes[idx - 1]
         for j in range(idx):
-            opens[j]  -= gap
-            highs[j]  -= gap
-            lows[j]   -= gap
+            opens[j] -= gap
+            highs[j] -= gap
+            lows[j] -= gap
             closes[j] -= gap
 
     # Build output records
@@ -134,24 +136,36 @@ def panama_adjust(rows: list[dict], roll_indices: list[int]) -> list[dict]:
         if i > 0 and closes[i - 1] > 0 and closes[i] > 0:
             ret_1d = math.log(closes[i] / closes[i - 1])
 
-        result.append({
-            "symbol":            r["symbol"],
-            "date":              r["date"],
-            "open":              round(opens[i],  4),
-            "high":              round(highs[i],  4),
-            "low":               round(lows[i],   4),
-            "close":             round(closes[i], 4),
-            "close_unadjusted":  round(raw_cls[i], 4),
-            "volume":            r["volume"],
-            "is_roll_date":      "1" if is_roll[i] else "0",
-        })
+        result.append(
+            {
+                "symbol": r["symbol"],
+                "date": r["date"],
+                "open": round(opens[i], 4),
+                "high": round(highs[i], 4),
+                "low": round(lows[i], 4),
+                "close": round(closes[i], 4),
+                "close_unadjusted": round(raw_cls[i], 4),
+                "volume": r["volume"],
+                "is_roll_date": "1" if is_roll[i] else "0",
+            }
+        )
     return result
 
 
 # ── Output ────────────────────────────────────────────────────────────────────
 
-FIELDNAMES = ["symbol", "date", "open", "high", "low", "close",
-              "close_unadjusted", "volume", "is_roll_date"]
+FIELDNAMES = [
+    "symbol",
+    "date",
+    "open",
+    "high",
+    "low",
+    "close",
+    "close_unadjusted",
+    "volume",
+    "is_roll_date",
+]
+
 
 def write_continuous(sym: str, rows: list[dict]) -> None:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -164,14 +178,16 @@ def write_continuous(sym: str, rows: list[dict]) -> None:
 
 # ── Per-symbol pipeline ───────────────────────────────────────────────────────
 
+
 def build_symbol(sym: str, sigma_threshold: float) -> str:
     try:
-        rows        = load_raw(sym)
-        roll_idx    = detect_rolls(rows, sigma_threshold)
-        adjusted    = panama_adjust(rows, roll_idx)
+        rows = load_raw(sym)
+        roll_idx = detect_rolls(rows, sigma_threshold)
+        adjusted = panama_adjust(rows, roll_idx)
         write_continuous(sym, adjusted)
-        return (f"  OK  {sym:4s} — {len(adjusted)} bars, "
-                f"{len(roll_idx)} roll(s) detected")
+        return (
+            f"  OK  {sym:4s} — {len(adjusted)} bars, {len(roll_idx)} roll(s) detected"
+        )
     except FileNotFoundError as e:
         return f"  SKIP {sym:4s} — {e}"
     except Exception as e:
@@ -180,13 +196,25 @@ def build_symbol(sym: str, sigma_threshold: float) -> str:
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Panama back-adjust continuous futures")
-    parser.add_argument("--symbols", nargs="+", default=SYMBOLS,
-                        choices=SYMBOLS, help="Symbols to process")
-    parser.add_argument("--roll-threshold", type=float, default=DEFAULT_ROLL_SIGMA,
-                        metavar="SIGMA",
-                        help="Gap size in rolling-stddev units to flag as a roll (default 4.0)")
+    parser = argparse.ArgumentParser(
+        description="Panama back-adjust continuous futures"
+    )
+    parser.add_argument(
+        "--symbols",
+        nargs="+",
+        default=SYMBOLS,
+        choices=SYMBOLS,
+        help="Symbols to process",
+    )
+    parser.add_argument(
+        "--roll-threshold",
+        type=float,
+        default=DEFAULT_ROLL_SIGMA,
+        metavar="SIGMA",
+        help="Gap size in rolling-stddev units to flag as a roll (default 4.0)",
+    )
     args = parser.parse_args()
 
     print(f"Panama back-adjustment  (roll threshold: {args.roll_threshold}σ)")
