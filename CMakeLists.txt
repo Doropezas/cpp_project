@@ -19,7 +19,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
-# ── Library: core (thread pool, queue — header-only templates + ThreadPool.cpp)
+# ── Library: core (thread pool, queue — header-only templates + ThreadPool.cpp) ──
 add_library(core_lib
     src/core/ThreadPool.cpp
 )
@@ -29,8 +29,25 @@ target_include_directories(core_lib PUBLIC include)
 add_library(data_lib
     src/data/CSVLoader.cpp
     src/data/MarketDataLoader.cpp
+    src/data/MacroDataLoader.cpp
 )
 target_include_directories(data_lib PUBLIC include)
+
+# ── Library: signals ──────────────────────────────────────────────────────────
+add_library(signals_lib
+    src/signals/MovingAverageSignal.cpp
+    src/signals/MomentumSignal.cpp
+    src/signals/VolatilitySignal.cpp
+    src/signals/RegimeClassifier.cpp
+)
+target_link_libraries(signals_lib PUBLIC data_lib core_lib)
+
+# ── Library: backtester ───────────────────────────────────────────────────────
+add_library(backtest_lib
+    src/backtest/Backtester.cpp
+    src/backtest/ResultAggregator.cpp
+)
+target_link_libraries(backtest_lib PUBLIC signals_lib core_lib)
 
 # ── Main executable ───────────────────────────────────────────────────────────
 add_executable(quant_engine src/main.cpp)
@@ -51,24 +68,9 @@ add_executable(test_pool tests/test_thread_pool.cpp)
 target_link_libraries(test_pool PRIVATE core_lib)
 add_test(NAME thread_pool COMMAND test_pool)
 
-# ── Library: signals ──────────────────────────────────────────────────────────
-add_library(signals_lib
-    src/signals/MovingAverageSignal.cpp
-    src/signals/MomentumSignal.cpp
-    src/signals/VolatilitySignal.cpp
-)
-target_link_libraries(signals_lib PUBLIC data_lib core_lib)
-
 add_executable(test_signals tests/test_signals.cpp)
 target_link_libraries(test_signals PRIVATE signals_lib)
 add_test(NAME signals COMMAND test_signals)
-
-# ── Library: backtester ───────────────────────────────────────────────────────
-add_library(backtest_lib
-    src/backtest/Backtester.cpp
-    src/backtest/ResultAggregator.cpp
-)
-target_link_libraries(backtest_lib PUBLIC signals_lib core_lib)
 
 add_executable(test_backtester tests/test_backtester.cpp)
 target_link_libraries(test_backtester PRIVATE backtest_lib)

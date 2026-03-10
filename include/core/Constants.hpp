@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <string_view>
 
 // Baseline signal and portfolio parameters from RESEARCH.md §13.
 //
@@ -16,3 +17,7 @@ inline constexpr std::size_t kMomSkip      = 5;    // momentum skip (reversal gu
 inline constexpr std::size_t kVolWindow    = 20;   // realized volatility window
 
 inline constexpr double kAnnualizationFactor = 252.0;  // trading days per year
+
+// IS / OOS date split (RESEARCH.md §4): first 70% in-sample, last 30% out-of-sample.
+// Approximate split: 2010-06-07 → 2021-12-31 IS, 2022-01-01 → present OOS.
+inline constexpr std::string_view kISSplitDate = "2021-12-31";

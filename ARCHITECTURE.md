@@ -111,27 +111,7 @@ public:
 
 This module is single-purpose and mostly synchronous. It does not compute signals.
 
-After loading, bars are stored in a **shared read-only cache** protected by `std::shared_mutex`. Many worker threads read concurrently; only the initial loader writes.
-
-```cpp
-class MarketDataCache {
-public:
-    // Called once by the loader thread — exclusive write access
-    void store(std::vector<DailyBar> bars);
-
-    // Called by many worker threads — concurrent read access
-    std::span<const DailyBar> get(const std::string& symbol) const;
-
-private:
-    mutable std::shared_mutex mutex_;
-    std::unordered_map<std::string, std::vector<DailyBar>> data_;
-};
-
-// Writer:  std::unique_lock lock(mutex_);   — exclusive
-// Readers: std::shared_lock lock(mutex_);   — concurrent
-```
-
-This is the canonical reader-writer lock pattern from the course.
+In the current implementation, bars are loaded once by the main thread and passed to worker threads by value (moved into lambda captures). A `MarketDataCache` with `std::shared_mutex` for concurrent read access is a planned future extension (see §13).
 
 ### 3.2 Thread Pool
 
@@ -157,15 +137,15 @@ public:
 
 private:
     ThreadSafeQueue<std::function<void()>> tasks_;  // type-erased task storage
-    std::vector<JThread> workers_;                  // JThread auto-joins in destructor
+    std::vector<std::jthread> workers_;   // auto-joins on destruction (C++20)
 };
 ```
 
-`JThread` is a hand-rolled RAII wrapper around `std::thread` that joins automatically on destruction — identical contract to `std::jthread`, which Apple's libc++ does not yet ship despite claiming C++20 support.
+Uses real `std::jthread` (C++20) via Homebrew GCC 15 (`/opt/homebrew/bin/g++-15`). Apple's Clang ships an incomplete `libc++` that lacks `std::jthread`; the CMakeLists.txt sets `CMAKE_CXX_COMPILER` to GCC 15 explicitly.
 
 Key course concepts demonstrated here:
 - **Rule of five**: destructor defined → copy/move explicitly deleted
-- **`JThread` / RAII**: auto-joins on destruction — no manual `join()`, no leaked threads
+- **`std::jthread` / RAII**: auto-joins on destruction — no manual `join()`, no leaked threads
 - **`std::function`**: type erasure — queue holds any callable regardless of signature
 - **Perfect forwarding**: `F&&` + `Args&&...` + `std::forward` preserves value categories
 - **`std::future` / `std::packaged_task`**: async result passing between threads
@@ -429,7 +409,7 @@ cpp_project/
 ├── CMakeLists.txt
 ├── README.md
 ├── ARCHITECTURE.md
-├── Research.md
+├── RESEARCH.md
 ├── data_ingestion.md
 ├── .env.example
 ├── data/
@@ -438,42 +418,53 @@ cpp_project/
 │   │   ├── fred/               # 9 FRED macro series CSVs
 │   │   └── vix/                # CBOE VIX daily CSV
 │   ├── processed/
-│   │   └── continuous/         # Panama-adjusted futures CSVs
+│   │   ├── continuous/         # Panama-adjusted futures CSVs (9 symbols)
+│   │   └── macro/              # macro_panel.csv — 20 z-score features × 4097 dates
 │   └── sample/                 # 5-bar CSVs for unit tests
+├── output/                     # experiment artifacts (gitignored)
+│   └── <experiment_id>/
+│       ├── <SYMBOL>_equity.csv
+│       └── <SYMBOL>_positions.csv
 ├── scripts/
 │   ├── download_data.py        # parallel Databento + FRED + VIX download
-│   └── build_continuous.py     # Panama back-adjustment
+│   ├── build_continuous.py     # Panama back-adjustment
+│   └── build_macro_panel.py    # z-score features from FRED + VIX
 ├── include/
 │   ├── core/
-│   │   ├── Constants.hpp       # constexpr baseline values
+│   │   ├── Constants.hpp       # constexpr baseline values + kISSplitDate
 │   │   ├── DailyBar.hpp
 │   │   ├── MarketEvent.hpp
 │   │   ├── RollingWindow.hpp   # template circular buffer
-│   │   ├── ThreadPool.hpp      # ThreadPool + JThread
+│   │   ├── ThreadPool.hpp      # std::jthread-based thread pool
 │   │   └── ThreadSafeQueue.hpp
 │   ├── data/
 │   │   ├── CSVLoader.hpp
-│   │   └── MarketDataLoader.hpp
+│   │   ├── MarketDataLoader.hpp
+│   │   └── MacroDataLoader.hpp # MacroPanel — date-indexed macro feature map
 │   ├── signals/
 │   │   ├── SignalResult.hpp    # SignalResult struct + SignalComputable concept
 │   │   ├── MovingAverageSignal.hpp
 │   │   ├── MomentumSignal.hpp
-│   │   └── VolatilitySignal.hpp
+│   │   ├── VolatilitySignal.hpp
+│   │   └── RegimeClassifier.hpp # 4-regime softmax classifier
 │   └── backtest/
 │       ├── PerformanceMetrics.hpp
-│       ├── Backtester.hpp
-│       └── ResultAggregator.hpp
+│       ├── Backtester.hpp       # DailyPosition + RunResult + IS/OOS support
+│       ├── ResultAggregator.hpp # portfolio_pnl() cross-symbol inv-vol
+│       └── ExperimentConfig.hpp # typed config struct with constexpr defaults
 ├── src/
-│   ├── main.cpp
+│   ├── main.cpp                 # CLI, IS/OOS reporting, artifact writing
 │   ├── core/
 │   │   └── ThreadPool.cpp
 │   ├── data/
 │   │   ├── CSVLoader.cpp
-│   │   └── MarketDataLoader.cpp
+│   │   ├── MarketDataLoader.cpp
+│   │   └── MacroDataLoader.cpp
 │   ├── signals/
 │   │   ├── MovingAverageSignal.cpp
 │   │   ├── MomentumSignal.cpp
-│   │   └── VolatilitySignal.cpp
+│   │   ├── VolatilitySignal.cpp
+│   │   └── RegimeClassifier.cpp
 │   └── backtest/
 │       ├── Backtester.cpp
 │       └── ResultAggregator.cpp
@@ -569,16 +560,17 @@ The C++ engine reads only from `data/processed/` at runtime.
 
 ## 13. Future Extensions
 
-After the MVP:
-
+- **Mean reversion signal**: z-score on returns, short-term reversal, rolling regression; feeds into regime-weighted combination alongside existing trend signals
+- **MarketDataCache with `shared_mutex`**: after initial load, store bars in a shared read-only cache; workers hold `std::shared_lock` concurrently, loader holds `std::unique_lock` once during write — canonical reader-writer pattern
+- **JSON config output**: serialize `ExperimentConfig` to `config.json` per experiment using `std::format` or a lightweight JSON library
+- **`std::variant`-based config**: for YAML/JSON-driven parameter sweeps, `ConfigValue = std::variant<int, double, std::string, bool>` with `std::visit` dispatch
+- **HMM regime model**: Hidden Markov Model over macro state; Baum-Welch forward pass for filtered regime probabilities
+- **Carry signal**: roll-yield-based directional signal; deferred from baseline
 - **Interfaces**: `IDataSource`, `IFeature`, `IModel`, `IPortfolioConstructor` for swappable implementations
-- **Regime engine**: hidden Markov model over macro state vector
 - **Portfolio optimizer**: mean-variance or risk-parity extension
-- **Live adapters**: separate research-time simulation from live-trading abstractions
-- **Columnar storage**: in-memory feature store (columnar layout vs. row-based structs) for cache efficiency — fields accessed together should live on the same cache lines; fields accessed independently should be padded to separate cache lines to avoid false sharing
-- **Caching**: processed feature panels cached between runs
+- **Columnar storage**: in-memory feature store for cache efficiency
 - **Factor model layer**: cross-sectional ranking, PCA, ridge signal combination
-- **Benchmark comparison**: equal-weight buy-and-hold as baseline
+- **Live adapters**: separate research-time simulation from live-trading abstractions
 
 ---
 

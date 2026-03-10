@@ -96,10 +96,10 @@ The backtest period (2010 onward) is split into:
 
 | Partition | Dates | Use |
 |-----------|-------|-----|
-| In-sample (IS) | 2010-01-01 — approx. 2018-12-31 | parameter selection, signal development |
-| Out-of-sample (OOS) | approx. 2019-01-01 — present | evaluation only |
+| In-sample (IS) | 2010-06-07 — 2021-12-31 | parameter selection, signal development |
+| Out-of-sample (OOS) | 2022-01-01 — present | evaluation only |
 
-The exact split date is defined in the experiment config and fixed for all experiments. No re-using OOS data to tune parameters.
+The split date `"2021-12-31"` is defined as `kISSplitDate` in `Constants.hpp` and used by all experiments. No re-using OOS data to tune parameters.
 
 **No walk-forward in the baseline.** Walk-forward cross-validation is a future extension. The baseline uses a single fixed split to keep the results interpretable and the implementation simple.
 
@@ -265,15 +265,15 @@ Z_t = [z(DGS2), z(DGS10), z(T10Y3M), z(Δ20 T10Y3M),
 ### Four Latent Regimes
 
 ```
-R_t ∈ {1, 2, 3, 4}
+R_t ∈ {0, 1, 2, 3}
 
-1 = Risk-on / disinflationary growth
-2 = Inflation / reflation
-3 = Growth scare / slowdown
-4 = Stress / crisis
+0 = Risk-On        — equity bull, tight spreads, low volatility
+1 = Risk-Off       — equity bear, wide spreads, high volatility
+2 = Inflationary   — rising breakevens, commodity outperformance
+3 = Disinflationary — falling inflation, falling yields, bond outperformance
 ```
 
-### Score-Based Regime Model (Baseline)
+### Score-Based Regime Model (Implemented)
 
 Build one score per regime as a weighted linear combination of the macro state vector:
 
@@ -281,22 +281,35 @@ Build one score per regime as a weighted linear combination of the macro state v
 S_k(t) = a_k + w_k^T Z_t
 ```
 
-Example hand-designed weights:
+Prior weights implemented in `RegimeClassifier` (see `include/signals/RegimeClassifier.hpp`):
 
 ```
-S_risk-on    = -0.5 z_VIX  - 0.5 z_credit  - 0.4 z_FSI  + 0.3 z_Δslope  - 0.2 z_USD
-S_inflation  = +0.6 z_BE   + 0.5 z_realchg  + 0.3 z_10Y  - 0.2 z_slope   + 0.2 z_USD
-S_slowdown   = -0.5 z_slope - 0.4 z_Δslope  + 0.3 z_credit + 0.2 z_VIX
-S_stress     = +0.7 z_VIX  + 0.7 z_FSI     + 0.6 z_credit - 0.3 z_slope  + 0.2 z_USD
+S_risk-on       = -0.5 VIX_z  - 0.4 BAA10Y_z  + 0.2 DGS10_z  + 0.3 T10Y3M_z
+S_risk-off      = +0.6 VIX_z  + 0.5 BAA10Y_z  + 0.4 STLFSI4_z - 0.3 T10Y3M_z
+S_inflationary  = +0.6 T10YIE_z + 0.4 DFII10_z + 0.3 DGS10_d20_z - 0.2 DTWEXBGS_z
+S_disinflat.    = -0.5 T10YIE_z - 0.4 DGS10_z  - 0.3 DGS10_d20_z + 0.3 DTWEXBGS_z
 ```
 
-Convert scores to regime probabilities via softmax:
+Convert scores to regime probabilities via numerically stable softmax:
 
 ```
-P(R_t = k | Z_t) = exp(S_k(t)) / Σ_j exp(S_j(t))
+P(R_t = k | Z_t) = exp(S_k(t) - max_j S_j) / Σ_j exp(S_j(t) - max_j S_j)
 ```
 
-This is transparent, explainable, and easy to implement in C++.
+### Regime Signal Scalars
+
+Each regime has a multiplier for the trend-following position:
+
+```
+Risk-On:        +1.0  (amplify — trend works in bull markets)
+Risk-Off:       -0.3  (dampen/reverse — draw-down environment)
+Inflationary:   +0.7  (moderate — commodity trends dominate)
+Disinflationary: +0.8 (moderate — bond trend dominates equities)
+
+final_position = clamp(direction_i * Σ_k p_k * scale_k, -1, +1)
+```
+
+Run with: `./quant_engine data/processed/continuous --regime --id regime_v1`
 
 ### HMM Extension (Optional)
 
@@ -332,22 +345,22 @@ Carry signal (`α_carry`) is explicitly deferred to a later version. The baselin
 
 ## 10. Model Families
 
-Three model families are implemented.
-
-### Trend Model
+### Trend Model — Implemented (baseline)
 - Moving average crossover (MA20/MA100)
 - Time-series momentum (60-day, 5-day skip)
-- Volatility-scaled signal
+- Volatility-scaled single-symbol position
+- Cross-symbol inverse-volatility portfolio (`ResultAggregator::portfolio_pnl()`)
 
-### Mean Reversion / Statistical Model
-- Z-score on returns
-- Short-term reversal
-- Rolling regression or ridge combination of features
+### Regime-Aware Model — Implemented
+- Score-based regime classifier (`RegimeClassifier`) over macro state vector Z_t
+- Softmax probabilities over 4 regimes
+- Regime-probability-weighted signal scalar applied to trend positions
+- Run with `--regime` flag
 
-### Regime-Aware Model
-- Score-based regime classifier over macro state vector `Z_t`
-- Switch between trend and mean-reversion logic based on regime
-- Optional: HMM regime filter
+### Mean Reversion / Statistical Model — **Not yet implemented**
+- Planned for a future layer (RESEARCH.md §11)
+- Would include: z-score on returns, short-term reversal, rolling regression, ridge signal combination
+- The regime formula `p2(t) * α_carry + (p3+p4) * α_mr` references carry and mean-reversion signals that are not yet built; the regime model currently scales the trend signal only
 
 **Not included:** deep learning models. These would dilute the C++ systems story.
 
@@ -393,23 +406,26 @@ Once launched, it has a unique ID and a fixed configuration. No result should ex
 
 ### Config Value Types
 
-Config parameter values use `std::variant` so a single `ConfigValue` type holds integers, doubles, strings, or booleans without a separate type per field:
+The implemented `ExperimentConfig` uses a plain struct with typed fields and `constexpr` defaults (see `include/backtest/ExperimentConfig.hpp`):
 
 ```cpp
-using ConfigValue = std::variant<int, double, std::string, bool>;
-
 struct ExperimentConfig {
-    std::unordered_map<std::string, ConfigValue> params;
-};
+    std::string id         {"baseline"};
+    std::string data_path  {"data/processed/continuous"};
+    std::string macro_path {"data/processed/macro/macro_panel.csv"};
+    std::string output_dir {"output"};
+    std::string split_date {std::string(kISSplitDate)};  // "2021-12-31"
 
-// Reading a typed value with structured bindings:
-auto get_window = [&](const std::string& key) {
-    return std::get<int>(config.params.at(key));
+    std::size_t ma_fast  {kMaFastWindow};   // 20
+    std::size_t ma_slow  {kMaSlowWindow};   // 100
+    std::size_t mom_lb   {kMomLookback};    // 60
+    std::size_t mom_skip {kMomSkip};        // 5
+
+    bool use_regime{false};
 };
-int ma_fast = get_window("ma_fast");  // 20
 ```
 
-`std::visit` can dispatch on the active type for serialization, validation, or sweep generation without casting.
+A `std::variant<int, double, std::string, bool>`-based config (for YAML-driven sweeps) is a planned future extension (see §14 stretch goals).
 
 ### Required Configuration Fields
 
@@ -539,14 +555,20 @@ e.g.: trend_macro_20100101_a81f29
 
 ### Output Artifacts
 
+Written to `output/<experiment_id>/` (implemented):
+
 ```
-results/experiments/<experiment_id>/
-    config.json
-    metrics.json
-    equity_curve.csv
-    positions.csv
-    signals.csv
-    summary.txt
+output/<experiment_id>/
+    <SYMBOL>_equity.csv     — date, cum_pnl
+    <SYMBOL>_positions.csv  — date, symbol, position, pnl, cum_pnl
+```
+
+Planned future artifacts:
+```
+    config.json             — full experiment parameters (future)
+    metrics.json            — structured metrics output (future)
+    signals.csv             — per-day signal values per symbol (future)
+    summary.txt             — human-readable summary (future)
 ```
 
 ### Failure Handling
@@ -590,5 +612,5 @@ All fixed baseline values in one place:
 | Continuous futures | Panama additive back-adjustment |
 | Roll trigger | Volume crossover; fallback 5 days before expiry |
 | OOS split | 70% IS / 30% OOS, fixed (no walk-forward in baseline) |
-| Approximate OOS start | 2019-01-01 |
+| IS end / OOS start | 2021-12-31 / 2022-01-01 (`kISSplitDate` in Constants.hpp) |
 | Random seed | 42 |

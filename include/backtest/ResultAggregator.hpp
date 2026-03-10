@@ -25,8 +25,9 @@
 //   agg.add_symbol("ES", es_bars);
 //   agg.add_symbol("GC", gc_bars);
 //   agg.wait_all();
-//   auto& results = agg.symbol_results();   // per-symbol RunResult
-//   auto  summary = agg.portfolio_summary(); // equal-weighted combined metrics
+//   auto& results  = agg.symbol_results();     // per-symbol RunResult
+//   auto  summary  = agg.portfolio_summary();  // equal-weighted combined metrics
+//   auto  portfolio = agg.portfolio_pnl();     // proper cross-symbol inv-vol portfolio
 
 class ResultAggregator
 {
@@ -57,9 +58,20 @@ public:
     [[nodiscard]] const std::vector<PerformanceMetrics> &
     all_metrics() const { return metrics_; }
 
-    // Equal-weighted portfolio summary across all symbols.
+    // Equal-weighted portfolio summary across all symbols (simple average of metrics).
     [[nodiscard]] PerformanceMetrics portfolio_summary(
         const std::string &label = "portfolio") const;
+
+    // Cross-symbol inverse-volatility portfolio PnL (RESEARCH.md §6).
+    //
+    // For each trading day t, computes:
+    //   w_i(t) = (1/σ_i(t)) / Σ_j(1/σ_j(t))
+    //   portfolio_pnl(t) = Σ_i direction_i(t) * w_i(t) * return_1d_i(t)
+    //
+    // Only symbols with a valid vol_estimate (> 0) on a given day contribute.
+    // Returns PerformanceMetrics for the cross-symbol portfolio series.
+    [[nodiscard]] PerformanceMetrics portfolio_pnl(
+        const std::string &label = "portfolio_inv_vol") const;
 
 private:
     ThreadPool &pool_;
