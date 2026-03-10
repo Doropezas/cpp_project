@@ -1,8 +1,8 @@
 # Multithreaded Quant Research Engine
 
-C++20 research engine that runs trend-following and momentum signals across 9 macro futures in parallel, backtests them, and reports performance metrics.
+C++ research engine that runs trend-following and momentum signals across 9 macro futures in parallel, backtests them, and reports performance metrics.
 
-Built as a systems-programming project — the finance domain gives concrete motivation for every technical decision: threads for parallel symbol processing, queues for the data pipeline, templates for reusable containers and indicators, RAII for correctness under failure.
+Threads for parallel symbol processing, queues for the data pipeline, templates for reusable containers and indicators, RAII for correctness under failure.
 
 ## Quick Start
 
@@ -37,7 +37,7 @@ ThreadSafeQueue → ThreadPool → ResultAggregator
 CSVLoader → MarketDataLoader → Backtester ← SignalEngine
 ```
 
-## C++20 concepts demonstrated
+## C++20 use:
 
 - `std::thread`, `std::mutex`, `std::condition_variable` (producer-consumer queue)
 - `std::scoped_lock` on two mutexes (ResultAggregator)
@@ -55,15 +55,8 @@ Included in the repo (`data/`):
 - `raw/fred/` — 9 FRED macro series (yields, spreads, stress index)
 - `raw/vix/` — CBOE VIX daily closes
 
-To re-download from source:
-```bash
-cp .env.example .env   # add your API keys
-python3 scripts/download_data.py
-python3 scripts/build_continuous.py
-```
-
 ## Docs
 
-- [ARCHITECTURE.md](ARCHITECTURE.md) — system design, concurrency model, module interfaces
-- [RESEARCH.md](RESEARCH.md) — signals, portfolio construction, macro regime model
+- [ARCHITECTURE.md](Architechture.md) — system design, concurrency model, module interfaces
+- [RESEARCH.md](Research.md) — signals, portfolio construction, macro regime model
 - [data_ingestion.md](data_ingestion.md) — data pipeline, Panama adjustment algorithm

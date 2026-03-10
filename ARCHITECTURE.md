@@ -156,20 +156,19 @@ public:
         -> std::future<std::invoke_result_t<F, Args...>>;
 
 private:
-    std::vector<std::jthread> workers_;   // jthread auto-joins in destructor
-    std::queue<std::function<void()>> tasks_;  // type-erased task storage
-    std::mutex queue_mutex_;
-    std::condition_variable cv_;
-    bool stop_{false};
+    ThreadSafeQueue<std::function<void()>> tasks_;  // type-erased task storage
+    std::vector<JThread> workers_;                  // JThread auto-joins in destructor
 };
 ```
 
+`JThread` is a hand-rolled RAII wrapper around `std::thread` that joins automatically on destruction — identical contract to `std::jthread`, which Apple's libc++ does not yet ship despite claiming C++20 support.
+
 Key course concepts demonstrated here:
 - **Rule of five**: destructor defined → copy/move explicitly deleted
-- **`std::jthread`**: auto-joins on destruction — no manual `join()` needed
+- **`JThread` / RAII**: auto-joins on destruction — no manual `join()`, no leaked threads
 - **`std::function`**: type erasure — queue holds any callable regardless of signature
 - **Perfect forwarding**: `F&&` + `Args&&...` + `std::forward` preserves value categories
-- **`std::future` / `std::promise`**: async result passing between threads
+- **`std::future` / `std::packaged_task`**: async result passing between threads
 
 The thread pool does not know anything about finance logic.
 
@@ -180,30 +179,34 @@ Computes reusable indicators and transforms them into trading signals. Does not 
 ```cpp
 struct SignalResult {
     std::string symbol;
-    double value;       // normalized signal in [-1, +1]
-    double confidence;  // optional strength measure
+    double value{0.0};       // directional signal: +1 (long), -1 (short)
+    double confidence{0.0};  // signal strength [0, 1]
+    bool   valid{false};     // false during warmup period
 };
 
-class MovingAverageSignal { /* ... */ };
-class MomentumSignal      { /* ... */ };
-class VolatilitySignal    { /* ... */ };
+// C++20 Concept: constrains any class that implements compute()
+template<typename T>
+concept SignalComputable = requires(const T& s, std::span<const DailyBar> bars) {
+    { s.compute(bars) } -> std::same_as<SignalResult>;
+};
 
-// std::variant for signal storage: one slot, one active type at a time
-using AnySignal = std::variant<MovingAverageSignal, MomentumSignal, VolatilitySignal>;
-
-// Dispatch via std::visit — no virtual calls, no inheritance required
-SignalResult compute(const AnySignal& signal, std::span<const DailyBar> bars) {
-    return std::visit([&](const auto& s) { return s.compute(bars); }, signal);
-}
+class MovingAverageSignal { /* fast/slow MA crossover */ };
+class MomentumSignal      { /* lookback/skip price ratio */ };
+class VolatilitySignal    { /* 20-day realized vol, annualized */ };
 ```
+
+All three classes satisfy `SignalComputable` — verified via `static_assert` in the test suite.
 
 Callers decompose results with structured bindings:
 
 ```cpp
-auto [sym, val, conf] = compute(signal, bars);
+auto r = signal.compute(bars);
+if (r.valid) {
+    // r.value, r.confidence available
+}
 ```
 
-Signal parameters (windows, thresholds) are passed in via config — not hardcoded.
+Signal parameters default to the `constexpr` baseline values in `Constants.hpp`.
 
 ### 3.4 Backtester
 
@@ -258,20 +261,19 @@ struct DailyBar {
 };
 
 struct PerformanceMetrics {
-    double cumulative_return{};
-    double annualized_return{};
-    double annualized_volatility{};
-    double sharpe_ratio{};
-    double max_drawdown{};
-    double hit_ratio{};
-    double turnover{};
+    std::string label;          // experiment ID or symbol name
+    double sharpe{0.0};         // annualized Sharpe ratio
+    double max_drawdown{0.0};   // peak-to-trough drawdown (≤ 0)
+    double hit_ratio{0.0};      // fraction of days with positive PnL
+    double turnover{0.0};       // mean daily absolute position change
+    double total_return{0.0};   // cumulative log-return over the period
+    int    num_days{0};
 };
 
-struct BacktestResult {
-    std::string symbol;
-    std::vector<double> returns;
-    std::vector<double> equity_curve;
-    PerformanceMetrics metrics;
+// Backtester::RunResult — returned by Backtester::run()
+struct RunResult {
+    std::vector<DailyPosition> positions;  // per-day position log
+    PerformanceMetrics         metrics;
 };
 ```
 
@@ -287,9 +289,11 @@ class RollingWindow {
 public:
     void push(T value);
     bool full() const;
+    std::size_t size() const;
+    T latest() const;
     T mean() const;
-    T stddev() const;
-    std::span<const T> view() const;
+    T stddev() const;          // population stddev
+    std::span<const T> raw_view() const;
 
 private:
     std::array<T, N> buf_{};
@@ -301,10 +305,12 @@ private:
 Default window sizes as `constexpr` constants so they are usable as template arguments:
 
 ```cpp
-inline constexpr std::size_t kMaFastWindow  = 20;
-inline constexpr std::size_t kMaSlowWindow  = 100;
-inline constexpr std::size_t kMomWindow     = 60;
-inline constexpr std::size_t kVolWindow     = 20;
+inline constexpr std::size_t kMaFastWindow = 20;
+inline constexpr std::size_t kMaSlowWindow = 100;
+inline constexpr std::size_t kMomLookback  = 60;
+inline constexpr std::size_t kMomSkip      = 5;
+inline constexpr std::size_t kVolWindow    = 20;
+inline constexpr double kAnnualizationFactor = 252.0;
 
 // Usage — zero runtime cost, size known at compile time:
 RollingWindow<double, kMaFastWindow>  fast_ma;
@@ -419,71 +425,65 @@ This is a systems-programming engine whose application domain is quantitative fi
 ## 7. Repository Structure
 
 ```text
-quant-research-engine/
+cpp_project/
 ├── CMakeLists.txt
 ├── README.md
 ├── ARCHITECTURE.md
-├── RESEARCH.md
+├── Research.md
 ├── data_ingestion.md
-├── configs/
-│   └── baseline.yaml
+├── .env.example
 ├── data/
 │   ├── raw/
-│   │   ├── databento/
-│   │   ├── fred/
-│   │   └── vix/
+│   │   ├── databento/          # gitignored — licensed source data
+│   │   ├── fred/               # 9 FRED macro series CSVs
+│   │   └── vix/                # CBOE VIX daily CSV
 │   ├── processed/
-│   │   ├── continuous/
-│   │   ├── macro/
-│   │   └── features/
-│   └── manifests/
-│       └── data_manifest.json
+│   │   └── continuous/         # Panama-adjusted futures CSVs
+│   └── sample/                 # 5-bar CSVs for unit tests
 ├── scripts/
-│   ├── download_data.py
-│   ├── build_continuous.py
-│   └── build_macro_panel.py
+│   ├── download_data.py        # parallel Databento + FRED + VIX download
+│   └── build_continuous.py     # Panama back-adjustment
 ├── include/
 │   ├── core/
-│   │   ├── MarketEvent.hpp
+│   │   ├── Constants.hpp       # constexpr baseline values
 │   │   ├── DailyBar.hpp
-│   │   ├── ThreadSafeQueue.hpp
-│   │   ├── ThreadPool.hpp
-│   │   ├── ResultTypes.hpp
-│   │   └── Config.hpp
+│   │   ├── MarketEvent.hpp
+│   │   ├── RollingWindow.hpp   # template circular buffer
+│   │   ├── ThreadPool.hpp      # ThreadPool + JThread
+│   │   └── ThreadSafeQueue.hpp
 │   ├── data/
 │   │   ├── CSVLoader.hpp
 │   │   └── MarketDataLoader.hpp
 │   ├── signals/
-│   │   ├── Signal.hpp
-│   │   ├── MovingAverage.hpp
-│   │   ├── Momentum.hpp
-│   │   └── Volatility.hpp
-│   ├── backtest/
-│   │   ├── PortfolioState.hpp
-│   │   ├── ExecutionModel.hpp
-│   │   └── Backtester.hpp
-│   └── analytics/
-│       ├── Metrics.hpp
+│   │   ├── SignalResult.hpp    # SignalResult struct + SignalComputable concept
+│   │   ├── MovingAverageSignal.hpp
+│   │   ├── MomentumSignal.hpp
+│   │   └── VolatilitySignal.hpp
+│   └── backtest/
+│       ├── PerformanceMetrics.hpp
+│       ├── Backtester.hpp
 │       └── ResultAggregator.hpp
 ├── src/
 │   ├── main.cpp
+│   ├── core/
+│   │   └── ThreadPool.cpp
 │   ├── data/
+│   │   ├── CSVLoader.cpp
+│   │   └── MarketDataLoader.cpp
 │   ├── signals/
-│   ├── backtest/
-│   └── analytics/
-├── results/
-│   └── experiments/
-│       └── <experiment_id>/
-│           ├── config.json
-│           ├── metrics.json
-│           ├── equity_curve.csv
-│           ├── positions.csv
-│           └── signals.csv
+│   │   ├── MovingAverageSignal.cpp
+│   │   ├── MomentumSignal.cpp
+│   │   └── VolatilitySignal.cpp
+│   └── backtest/
+│       ├── Backtester.cpp
+│       └── ResultAggregator.cpp
 └── tests/
-    ├── test_queue.cpp
+    ├── test_csv_loader.cpp
+    ├── test_thread_safe_queue.cpp
     ├── test_thread_pool.cpp
     ├── test_signals.cpp
-    └── test_backtester.cpp
+    ├── test_backtester.cpp
+    └── test_result_aggregator.cpp
 ```
 
 ---

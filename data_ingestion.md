@@ -23,12 +23,11 @@ Rationale:
 **Auth:** `DATABENTO_API_KEY` environment variable — never hardcode or commit.
 
 **What to download:**
-- Front-month contract bars for each symbol
-- One deferred contract per symbol (for roll detection)
+- Front-month continuous series (`ES.c.0` etc.) via `stype_in=continuous`
 
-**Raw format:** DBN files written to `data/raw/databento/`, one file per symbol/contract.
+**Raw format:** CSV files written to `data/raw/databento/`, one file per symbol.
 
-**At runtime:** the C++ engine reads DBN files locally. No live API calls.
+**At runtime:** the C++ engine reads CSV files locally via `CSVLoader`. No live API calls.
 
 ---
 
@@ -73,7 +72,7 @@ For STLFSI4 and WALCL, the download script records the `available_from` date alo
 ```
 data/
 ├── raw/
-│   ├── databento/          # DBN files per symbol/contract
+│   ├── databento/          # CSV files per symbol (gitignored)
 │   ├── fred/               # one CSV/JSON per series
 │   └── vix/                # CBOE VIX historical data
 ├── processed/
@@ -176,7 +175,7 @@ struct ReleaseMacroObservation {
   (Python / shell — run once)
   ┌─────────────────────────────────────────────────────┐
   │                                                     │
-  │  scripts/download_data.sh (or .py)                  │
+  │  scripts/download_data.py                            │
   │  reads: DATABENTO_API_KEY, FRED_API_KEY (env vars)  │
   │                                                     │
   │   Databento API ──────────────────► data/raw/databento/

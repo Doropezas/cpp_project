@@ -19,14 +19,14 @@ The goal is not to produce the optimal strategy, but to provide a **clear and de
 
 ## 2. Asset Universe
 
-The baseline universe is **9 liquid macro futures** representing major cross-asset classes. Daily data from January 2010.
+The baseline universe is **9 liquid macro futures** representing major cross-asset classes. Daily data from June 2010 (Databento GLBX.MDP3 availability).
 
 ```
 Equities
 --------
 ES   S&P 500 futures
 NQ   NASDAQ 100 futures
-RTY  Russell 2000 futures
+YM   Dow Jones futures
 
 Rates
 -----
@@ -439,7 +439,7 @@ data:
   start_date: 2010-01-01
   end_date: latest
   frequency: daily
-  universe: [ES, NQ, RTY, ZN, ZB, CL, GC, 6E, 6J]
+  universe: [ES, NQ, YM, ZN, ZB, CL, GC, 6E, 6J]
 
 features:
   returns_lookback: 60
@@ -573,8 +573,8 @@ All fixed baseline values in one place:
 | Parameter | Value |
 |-----------|-------|
 | Data frequency | Daily |
-| Backtest start | 2010-01-01 |
-| Universe | ES, NQ, RTY, ZN, ZB, CL, GC, 6E, 6J (9 instruments) |
+| Backtest start | 2010-06-06 (Databento GLBX.MDP3 availability) |
+| Universe | ES, NQ, YM, ZN, ZB, CL, GC, 6E, 6J (9 instruments) |
 | MA fast window | 20 trading days |
 | MA slow window | 100 trading days |
 | Momentum lookback | 60 trading days |
