@@ -1,51 +1,69 @@
 # Multithreaded Quant Research Engine
 
-A modern C++ project that demonstrates concurrency, RAII, templates, and modular design through a realistic quantitative research workflow using daily macro futures.
+C++20 research engine that runs trend-following and momentum signals across 9 macro futures in parallel, backtests them, and reports performance metrics.
 
-## Modules
-
-- **Market Data Loader** — reads local processed files, produces typed `DailyBar` objects
-- **Thread Pool** — task submission layer with `std::future`-based result collection
-- **Signal Engine** — computes trend, momentum, and volatility signals per symbol
-- **Backtester** — converts signals into positions, computes PnL and equity curve
-- **Result Aggregator** — collects parallel results, computes portfolio-level metrics
-
-## Why This Project
-
-This is a **systems-programming engine whose application domain is quantitative finance**. Every technical decision is justified by the domain:
-
-- threads because per-symbol and per-experiment tasks are naturally parallel
-- queues because producer-consumer is realistic for a data pipeline
-- templates because indicators and containers are genuinely reusable
-- RAII because correctness under failure matters in financial systems
-- backtesting because it gives a concrete, measurable use case
-
-## Course Concepts Demonstrated
-
-- object lifetimes and smart pointers (`std::unique_ptr`, RAII)
-- move semantics and value semantics
-- `std::thread`, `std::mutex`, `std::condition_variable`
-- `std::future` / async-style task results
-- templates (`ThreadSafeQueue<T>`, `RollingWindow<T>`)
-- modular architecture with narrow interfaces
+Built as a systems-programming project — the finance domain gives concrete motivation for every technical decision: threads for parallel symbol processing, queues for the data pipeline, templates for reusable containers and indicators, RAII for correctness under failure.
 
 ## Quick Start
 
 ```bash
-# 1. Download data (offline — run once)
-python scripts/download_data.py
+# Build
+cmake -S . -B build && cmake --build build
 
-# 2. Build
-cmake -B build && cmake --build build
+# Run on included data (no download needed)
+./build/quant_engine data/processed/continuous
 
-# 3. Run baseline experiment
-./build/quant_engine --config configs/baseline.yaml
+# Run tests
+ctest --test-dir build
 ```
 
-## Documentation
+## What it does
 
-| File | Contents |
-|------|----------|
-| [ARCHITECTURE.md](ARCHITECTURE.md) | System design, modules, concurrency, repo structure, test strategy |
-| [RESEARCH.md](RESEARCH.md) | Signals, portfolio construction, macro features, regime model, experiments |
-| [data_ingestion.md](data_ingestion.md) | Databento + FRED integration, continuous futures construction, data layout |
+Loads daily OHLCV bars for 9 futures (ES, NQ, YM, ZN, ZB, GC, CL, 6E, 6J), computes three signals per symbol, sizes positions by inverse volatility, and runs the backtest in parallel — one thread per symbol. Prints Sharpe, max drawdown, hit ratio, and turnover per symbol plus a portfolio summary.
+
+## Signals
+
+| Signal | Logic |
+|---|---|
+| Moving Average | MA(20) vs MA(100) crossover → ±1 |
+| Momentum | Price(t−5) / Price(t−60) → ±1 |
+| Volatility | 20-day realized vol, annualized — used for position sizing |
+
+## Modules
+
+```
+ThreadSafeQueue → ThreadPool → ResultAggregator
+                                     ↑
+CSVLoader → MarketDataLoader → Backtester ← SignalEngine
+```
+
+## C++20 concepts demonstrated
+
+- `std::thread`, `std::mutex`, `std::condition_variable` (producer-consumer queue)
+- `std::scoped_lock` on two mutexes (ResultAggregator)
+- `std::future` + `std::packaged_task` (ThreadPool::submit)
+- RAII: `JThread` auto-join wrapper, `unique_ptr`, `lock_guard`
+- Templates: `ThreadSafeQueue<T>`, `RollingWindow<T, N>` with `static_assert`
+- C++20 Concepts: `SignalComputable` constrains all signal classes
+- `std::span`, `std::format`, `std::filesystem`, structured bindings
+- Perfect forwarding, move semantics, rule of five
+
+## Data
+
+Included in the repo (`data/`):
+- `processed/continuous/` — Panama back-adjusted daily bars, 2010–2026
+- `raw/fred/` — 9 FRED macro series (yields, spreads, stress index)
+- `raw/vix/` — CBOE VIX daily closes
+
+To re-download from source:
+```bash
+cp .env.example .env   # add your API keys
+python3 scripts/download_data.py
+python3 scripts/build_continuous.py
+```
+
+## Docs
+
+- [ARCHITECTURE.md](ARCHITECTURE.md) — system design, concurrency model, module interfaces
+- [RESEARCH.md](RESEARCH.md) — signals, portfolio construction, macro regime model
+- [data_ingestion.md](data_ingestion.md) — data pipeline, Panama adjustment algorithm
